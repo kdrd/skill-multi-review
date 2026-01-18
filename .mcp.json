@@ -1,0 +1,14 @@
+{
+    "mcpServers": {
+        "code-intel": {
+            "type": "stdio",
+            "command": "/Users/ryotakadowaki/git/llm-helper/venv/bin/python",
+            "args": [
+                "/Users/ryotakadowaki/git/llm-helper/code_intel_server.py"
+            ],
+            "env": {
+                "PYTHONPATH": "/Users/ryotakadowaki/git/llm-helper"
+            }
+        }
+    }
+}

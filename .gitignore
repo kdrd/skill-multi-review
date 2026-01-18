@@ -6,3 +6,32 @@
 .code-intel/.last_sync
 .code-intel/learned_pairs.json
 
+# OS固有ファイル
+.DS_Store
+Thumbs.db
+.Spotlight-V100
+.Trashes
+desktop.ini
+
+# エディタ
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 一時ファイル
+/tmp/
+*.tmp
+*.log
+
+# Node.js（将来の拡張用）
+node_modules/
+
+# 環境変数（機密情報保護）
+.env
+.env.local
+
+# その他
+*.bak
+*.orig

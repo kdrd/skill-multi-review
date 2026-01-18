@@ -176,113 +176,7 @@ Task tool: subagent_type=general-purpose, run_in_background=true
 
 ## スキル仕様
 
-### Phase 1: Codex Skill（単体）
-
-#### 基本情報
-
-- **スキル名**: `codex`
-- **呼び出し方法**: `/codex`
-- **配置場所**: `~/.claude/skills/codex/SKILL.md`
-
-#### 使用コマンド
-
-```bash
-# 読み取り専用コードレビュー（推奨）
-codex exec --sandbox read-only -C <project_directory> "<request>"
-
-# 書き込みを許可する自動化タスク
-codex exec --full-auto -C <project_directory> "<request>"
-```
-
-#### パラメータ
-
-| パラメータ | 短縮形 | 説明 |
-|-----------|--------|------|
-| `--sandbox read-only` | `-s read-only` | 読み取り専用で安全な分析実施 |
-| `--sandbox workspace-write` | - | ワークスペースへの書き込み許可 |
-| `--full-auto` | - | 低摩擦自動化プリセット（workspace-write + on-request approvals） |
-| `--cd` | `-C` | 対象プロジェクトのディレクトリ指定 |
-| `--json` | - | JSON形式で出力 |
-
-**⚠️ 検証済み注意事項**:
-- `--full-auto`と`--sandbox read-only`を併用した場合、`read-only`は無視され`workspace-write`が適用されます
-- 読み取り専用レビューには必ず`--sandbox read-only`を単独で使用してください
-
----
-
-### Phase 2: Gemini Skill（単体）
-
-#### 基本情報
-
-- **スキル名**: `gemini`
-- **呼び出し方法**: `/gemini`
-- **配置場所**: `~/.claude/skills/gemini/SKILL.md`
-
-#### 使用コマンド
-
-```bash
-# 読み取り専用コードレビュー（推奨）
-# -s (sandbox) で隔離環境、-y なしで対話モード（修正を防ぐ）
-gemini -s "<request>。ファイルの修正は行わず、レビュー結果のみ出力してください。"
-
-# 非対話モードで読み取り専用レビュー
-# プロンプトで明示的に修正禁止を指示
-gemini -s -y "<request>。ファイルの修正は絶対に行わないでください。レビュー結果のみ出力してください。"
-
-# パイプでdiffを渡す方法（拡張機能不要）
-git diff HEAD~1..HEAD | gemini -s -y "Review these code changes for bugs, security issues, and code quality. Do NOT modify any files."
-
-# JSON出力（スクリプト連携用）
-gemini -s -y "<request>" --output-format json
-```
-
-**⚠️ 重要: レビュー時のファイル修正防止**
-- `-y` (YOLO) モードはツール実行を自動承認するため、**意図しないファイル修正が発生する可能性がある**
-- レビュー目的では**プロンプトで明示的に「修正禁止」を指示**することを推奨
-- 実装はClaude Codeが担当し、Codex/Geminiは**レビュー専用**として使用する設計
-
-**code-review拡張機能を使用する場合:**
-```bash
-# 拡張機能のインストール（初回のみ）
-gemini extensions install https://github.com/gemini-cli-extensions/code-review
-
-# 拡張機能を使ったコードレビュー
-gemini -y "/code-review" > code-review.md
-```
-
-#### パラメータ
-
-| パラメータ | 短縮形 | 説明 |
-|-----------|--------|------|
-| 位置引数 | - | 非対話モードでプロンプトを直接渡す（推奨） |
-| `--yolo` | `-y` | ツール実行の確認を全て自動承認 |
-| `--sandbox` | `-s` | 隔離環境で実行（`--yolo`使用時は自動有効） |
-| `--output-format json` | - | JSON形式で出力（スクリプト連携用） |
-| `--output-format stream-json` | - | リアルタイムイベントストリーミング |
-
-**非推奨オプション:**
-- `-p` / `--prompt`: 将来削除予定。位置引数を使用してください。
-
-#### sandboxモードの有効化方法
-
-1. **コマンドラインフラグ**: `gemini --sandbox "..."`
-2. **環境変数**:
-   - `GEMINI_SANDBOX=true` （デフォルト）
-   - `GEMINI_SANDBOX=docker` （Dockerベース）
-   - `GEMINI_SANDBOX=sandbox-exec` （macOS）
-
-**✅ 検証済み**: `gemini -s -y "prompt"` 形式で正常動作を確認（v0.24.0）
-
-#### Gemini CLI特有の機能
-
-- `code-review` 拡張: 別途インストールが必要な専用コードレビュー機能
-  - リポジトリ: https://github.com/gemini-cli-extensions/code-review
-- GitHub Action連携: `google-github-actions/run-gemini-cli`
-- スラッシュコマンド: `/code-review`（拡張機能インストール後に使用可能）
-
----
-
-### Phase 3: 並列レビュー Skill（3-Way）
+### 並列レビュー Skill（3-Way）
 
 #### 基本情報
 
@@ -292,36 +186,43 @@ gemini -y "/code-review" > code-review.md
 
 #### 実行フロー（3-Way）
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                       /multi-review 実行                             │
-└──────────────────────────────┬──────────────────────────────────────┘
-                               │
-         ┌─────────────────────┼─────────────────────┐
-         ▼                     ▼                     ▼
-┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
-│   Codex CLI     │  │   Gemini CLI    │  │  Claude Code    │
-│  (gpt-5.2)      │  │  (Gemini 2.0)   │  │  (Task Agent)   │
-│  (並列実行)      │  │  (並列実行)      │  │  (並列実行)      │
-└────────┬────────┘  └────────┬────────┘  └────────┬────────┘
-         │                    │                    │
-         └────────────────────┼────────────────────┘
-                              ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                 Claude Code による結果統合                           │
-│  1. 3エージェントの結果を分析                                        │
-│  2. 全エージェント共通指摘 → 最高優先度                               │
-│  3. 2エージェント以上の指摘 → 高優先度                                │
-│  4. 単独指摘 → 中優先度（内容精査）                                   │
-│  5. 統合レビュー案を作成                                             │
-└──────────────────────────────┬──────────────────────────────────────┘
-                               ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                 ユーザーへの提示と最終判断                            │
-│  - 優先度付き統合案を提示                                            │
-│  - 各エージェントの個別見解も参照可能                                 │
-│  - ユーザーが最終的に採用内容を決定                                   │
-└─────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    A["/multi-review 実行"] --> B["並列実行開始"]
+
+    subgraph Parallel["3エージェント並列実行"]
+        C["Codex CLI<br/>(gpt-5.2-codex)"]
+        D["Gemini CLI<br/>(Gemini 2.0 Flash)"]
+        E["Claude Code Task<br/>(Task Agent)"]
+    end
+
+    B --> C
+    B --> D
+    B --> E
+
+    C --> F["Claude Code による結果統合"]
+    D --> F
+    E --> F
+
+    F --> G["優先度付け"]
+    G --> G1["全エージェント共通 → 最高優先度"]
+    G --> G2["2エージェント以上 → 高優先度"]
+    G --> G3["単独指摘 → 中優先度"]
+
+    subgraph Integration["統合処理"]
+        G
+        G1
+        G2
+        G3
+    end
+
+    G1 --> H["ユーザーへの提示と最終判断"]
+    G2 --> H
+    G3 --> H
+
+    H --> H1["優先度付き統合案を提示"]
+    H --> H2["各エージェントの個別見解も参照可能"]
+    H --> H3["ユーザーが最終的に採用内容を決定"]
 ```
 
 #### 並列実行の実装方法（3-Way）
@@ -422,6 +323,12 @@ description: 200文字以内の説明（Claudeの起動判断に使用）
 | **最小依存** | 外部依存を最小限に |
 | **Progressive Disclosure** | メタデータ(~100語)→本文(<5k語)→リソース(オンデマンド) |
 
+### 開発方針
+
+- **オーケストレーター**: タスク管理・進捗監視・品質判断のみ
+- **実装**: 全てSubagent/Task Agentに委託
+- **サイクル**: 各タスクはPDCA（Plan→Do→Check→Act）で回す
+
 ### 参考リソース
 
 - **テンプレート**: https://github.com/anthropics/skills/blob/main/template/SKILL.md
@@ -458,6 +365,9 @@ description: 200文字以内の説明（Claudeの起動判断に使用）
 - プロジェクト固有の設定対応
 - CI/CD連携（GitHub Actions等）
 - レビュー結果のスコアリング・可視化
+- 設定ファイル対応（config.yml）
+- エイリアス定義（/mr, /review）
+- ログ保存機能
 
 ## 注意事項
 
@@ -485,11 +395,21 @@ description: 200文字以内の説明（Claudeの起動判断に使用）
 - Claude Code Task: プロンプトで「レビューのみ、変更禁止」を明示指示
 - 全エージェントが本番環境への書き込みを行わない設計
 
+### エラーハンドリング
+
+| 状況 | 挙動 |
+|------|------|
+| 1エージェント失敗 | 部分成功として継続（他のエージェント結果を統合） |
+| 2エージェント失敗 | 成功したエージェントの結果のみ提示、警告表示 |
+| 全エージェント失敗 | エラーメッセージを表示し、手動レビューを推奨 |
+| タイムアウト | 推奨300秒、超過時は部分結果で継続 |
+
 ### パフォーマンス
 
 - 各エージェントは数十秒〜数分かかる可能性
 - 並列実行により合計時間を短縮
 - ターミナル出力で進捗確認可能
+- 推奨タイムアウト: 300秒（各エージェント個別）
 
 ## 特記事項
 
@@ -500,7 +420,37 @@ description: 200文字以内の説明（Claudeの起動判断に使用）
 ---
 
 *作成日: 2026-01-18*
-*最終更新: 2026-01-18（直接/multi-review実装方針・Skill作成方針追加）*
+*最終更新: 2026-01-18（グローバルインストール設計・エラーハンドリング追加）*
+
+## グローバルインストール設計
+
+### インストール方式
+
+- シンボリックリンク方式（推奨）
+- リポジトリ: `~/skill-multi-review` または任意の場所にclone
+- リンク先: `~/.claude/skills/multi-review`
+
+### ディレクトリ構造
+
+```
+~/skill-multi-review/
+├── install.sh
+├── uninstall.sh
+├── skills/multi-review/SKILL.md
+├── PLAN.md
+├── TASK.md
+└── README.md
+```
+
+### 前提条件チェック
+
+| 項目 | 必須/推奨 | 備考 |
+|------|----------|------|
+| Claude Code | 必須 | オーケストレーター・結果統合 |
+| Codex CLI | 推奨 | なくても部分動作可能 |
+| Gemini CLI | 推奨 | なくても部分動作可能 |
+| OPENAI_API_KEY | Codex使用時 | 環境変数に設定 |
+| GOOGLE_API_KEY | Gemini使用時 | 環境変数に設定 |
 
 ## 調査ソース
 
